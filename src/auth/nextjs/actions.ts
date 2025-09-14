@@ -11,7 +11,7 @@ import {
 	generateSalt,
 	hashPassword,
 } from "../core/passwordHasher";
-import { createUserSession } from "../core/session";
+import { createUserSession, removeUserFromSession } from "../core/session";
 import { signInSchema, signUpSchema } from "./schemas";
 
 export async function signIn(unsafeData: z.infer<typeof signInSchema>) {
@@ -80,7 +80,7 @@ export async function signUp(unsafeData: z.infer<typeof signUpSchema>) {
 }
 
 export async function logOut() {
-	// await removeUserFromSession(await cookies());
+	await removeUserFromSession(await cookies());
 	redirect("/");
 }
 
