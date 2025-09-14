@@ -1,11 +1,12 @@
 "use server";
 
 import { db } from "@/drizzle/db";
-import { UserTable } from "@/drizzle/schema";
+import { OAuthProvider, UserTable } from "@/drizzle/schema";
 import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { OAuthClient } from "../core/oauth/base";
 import {
 	comparePasswords,
 	generateSalt,
@@ -86,5 +87,5 @@ export async function logOut() {
 
 export async function oAuthSignIn(provider: OAuthProvider) {
 	// const oAuthClient = getOAuthClient(provider);
-	// redirect(oAuthClient.createAuthUrl(await cookies()));
+	redirect(new OAuthClient().createAuthUrl(await cookies()));
 }

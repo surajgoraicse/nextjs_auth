@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/auth/nextjs/currentUser"
 import { db } from "@/drizzle/db"
 import { UserTable } from "@/drizzle/schema"
 import { eq } from "drizzle-orm"
+import { revalidatePath } from "next/cache"
 import { cookies } from "next/headers"
 
 export async function toggleRole() {
@@ -16,6 +17,6 @@ export async function toggleRole() {
     .where(eq(UserTable.id, user.id))
     .returning({ id: UserTable.id, role: UserTable.role })
 
-
   await updateUserSessionData(updatedUser, await cookies())
+  revalidatePath("/private")
 }

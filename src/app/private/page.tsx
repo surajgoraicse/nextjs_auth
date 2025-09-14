@@ -1,10 +1,11 @@
+"use server"
 import { getCurrentUser } from "@/auth/nextjs/currentUser";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ToggleRoleButton } from "./ToggleRoleButton";
 
 export default async function PrivatePage() {
-	const currentUser = await getCurrentUser({withFullUser : true}); 
+	const currentUser = await getCurrentUser({ withFullUser: true });
 
 	return (
 		<div className="container mx-auto p-4">
