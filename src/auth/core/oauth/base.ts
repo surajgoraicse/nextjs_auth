@@ -1,53 +1,95 @@
 import { env } from "@/data/env/server";
+import { OAuthProvider } from "@/drizzle/schema";
 import crypto from "crypto";
 import z from "zod";
 import { Cookies } from "../session";
+import { createDiscordOAuthClient } from "./discord";
+import { createGithubOAuthClient } from "./github";
 
 const COOKIE_EXPIRATION_SECONDS = 60 * 10;
 const STATE_COOKIE_KEY = "oauth_state";
 const CODE_VERIFIER_COOKIE_KEY = "oauth_code_verifier";
 
 export class OAuthClient<T> {
+	private readonly provider: OAuthProvider;
+	private readonly clientId: string;
+	private readonly clientSecret: string;
+	private readonly scopes: string[];
+	private readonly urls: {
+		auth: string;
+		token: string;
+		user: string;
+	};
 
-
-
-	private get redirectUrl() {
-		// Ensure trailing slash in OAUTH_REDIRECT_URL_BASE
-		return new URL("/api/oauth/github", env.OAUTH_REDIRECT_URL_BASE);
-	}
-
-	// GitHub token response schema
+	private readonly userInfo: {
+		schema: z.Schema<T>;
+		getUserDetails: (
+			data: T,
+			accessToken: string
+		) => Promise<{ id: string; email: string; name: string }>;
+	};
 	private readonly tokenSchema = z.object({
 		access_token: z.string(),
 		token_type: z.string(),
-		scope: z.string().optional(),
 	});
 
-	// GitHub user response schema
-	private readonly userSchema = z.object({
-		id: z.number(), // GitHub returns numeric id
-		login: z.string(),
-		name: z.string().nullable(),
-		email: z.string().email().nullable(),
-	});
+	constructor({
+		provider,
+		client_id,
+		client_secret,
+		scopes,
+		urls,
+		userInfo,
+	}: {
+		provider: OAuthProvider;
+		client_id: string;
+		client_secret: string;
+		scopes: string[];
+		urls: {
+			auth: string;
+			token: string;
+			user: string;
+		};
+		userInfo: {
+			schema: z.Schema<T>;
+			getUserDetails: (
+				data: T,
+				accessToken: string
+			) => Promise<{ id: string; email: string; name: string }>;
+		};
+	}) {
+		this.provider = provider;
+		this.clientId = client_id;
+		this.clientSecret = client_secret;
+		this.scopes = scopes;
+		this.urls = urls;
+		this.userInfo = userInfo;
+	}
 
+	private get redirectUrl() {
+		// Ensure trailing slash in OAUTH_REDIRECT_URL_BASE
+		return new URL(
+			`/api/oauth/${this.provider}`,
+			env.OAUTH_REDIRECT_URL_BASE
+		);
+	}
 
 	/**
-	 * Step 1: Generate GitHub Authorization URL
+	 * Step 1: Generate Authorization URL
 	 */
 	createAuthUrl(cookies: Pick<Cookies, "set">) {
 		const state = createState(cookies);
 		const codeVerifier = createCodeVerifier(cookies);
-		const url = new URL("https://github.com/login/oauth/authorize");
-		url.searchParams.set("client_id", env.GITHUB_CLIENT_ID);
+		const url = new URL(this.urls.auth);
+		url.searchParams.set("client_id", this.clientId);
 		url.searchParams.set("redirect_uri", this.redirectUrl.toString());
-		url.searchParams.set("scope", "read:user user:email");
+		url.searchParams.set("scope", this.scopes.join(" "));
 		url.searchParams.set("response_type", "code");
 		url.searchParams.set("state", state);
 		url.searchParams.set("code_challenge_method", "S256");
 		url.searchParams.set(
 			"code_challenge",
-			crypto.hash("sha256", codeVerifier, "base64url")
+			crypto.createHash("sha256").update(codeVerifier).digest("base64url")
 		);
 
 		return url.toString();
@@ -57,26 +99,23 @@ export class OAuthClient<T> {
 	 * Step 2: Exchange code for access token
 	 */
 	private async fetchToken(code: string, codeVerifier: string) {
-		const response = await fetch(
-			"https://github.com/login/oauth/access_token",
-			{
-				method: "POST",
-				headers: {
-					"Content-Type": "application/x-www-form-urlencoded",
-					Accept: "application/json",
-				},
-				body: new URLSearchParams({
-					code,
-					redirect_uri: this.redirectUrl.toString(),
-					client_id: env.GITHUB_CLIENT_ID,
-					client_secret: env.GITHUB_CLIENT_SECRET,
-					code_verifier: codeVerifier,
-				}),
-			}
-		);
+		const response = await fetch(this.urls.token, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded",
+				Accept: "application/json",
+			},
+			body: new URLSearchParams({
+				code,
+				redirect_uri: this.redirectUrl.toString(),
+				client_id: this.clientId,
+				client_secret: this.clientSecret,
+				code_verifier: codeVerifier,
+			}),
+		});
 
 		const rawData = await response.json();
-		console.log("GitHub Token Response:", rawData);
+		console.log(`${this.provider} Token Response:`, rawData);
 
 		const parsed = this.tokenSchema.safeParse(rawData);
 		if (!parsed.success) {
@@ -104,44 +143,22 @@ export class OAuthClient<T> {
 			getCodeVerifier(cookies)
 		);
 
-		// Step 1: fetch base user profile
-		const userResponse = await fetch("https://api.github.com/user", {
+		const userResponse = await fetch(this.urls.user, {
 			headers: {
 				Authorization: `${token_type} ${access_token}`,
 				Accept: "application/vnd.github+json",
 			},
 		});
 		const rawUser = await userResponse.json();
-		console.log("GitHub User Response:", rawUser);
+		console.log(`${this.provider} User Response:`, rawUser);
 
-		const parsedUser = this.userSchema.safeParse(rawUser);
+		const parsedUser = this.userInfo.schema.safeParse(rawData);
+
 		if (!parsedUser.success) {
 			throw new InvalidUserError(parsedUser.error);
 		}
 
-		// Step 2: fetch emails
-		const emailResponse = await fetch(
-			"https://api.github.com/user/emails",
-			{
-				headers: {
-					Authorization: `${token_type} ${access_token}`,
-					Accept: "application/vnd.github+json",
-				},
-			}
-		);
-		const emails: { email: string; primary: boolean; verified: boolean }[] =
-			await emailResponse.json();
-
-		const primaryEmail =
-			emails.find((e) => e.primary && e.verified)?.email ??
-			emails.find((e) => e.verified)?.email ??
-			null;
-
-		return {
-			id: parsedUser.data.id.toString(),
-			email: primaryEmail,
-			name: parsedUser.data.name ?? parsedUser.data.login,
-		};
+		return this.userInfo.getUserDetails(parsedUser.data, accessToken);
 	}
 }
 
@@ -201,5 +218,16 @@ function getCodeVerifier(cookies: Pick<Cookies, "get">) {
 export class InvalidCodeVerifierError extends Error {
 	constructor() {
 		super("Invalid code verifier");
+	}
+}
+
+export function getOAuthClient(provider: OAuthProvider) {
+	switch (provider) {
+		case "discord":
+			return createDiscordOAuthClient();
+		case "github":
+			return createGithubOAuthClient();
+		default:
+			throw new Error(`Unknown OAuth provider: ${provider}`);
 	}
 }

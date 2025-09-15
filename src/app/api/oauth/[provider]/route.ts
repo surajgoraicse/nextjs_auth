@@ -1,4 +1,4 @@
-import { OAuthClient } from "@/auth/core/oauth/base";
+import { getOAuthClient, OAuthClient } from "@/auth/core/oauth/base";
 import { createUserSession } from "@/auth/core/session";
 import { db } from "@/drizzle/db";
 import {
@@ -30,8 +30,10 @@ export async function GET(
 		);
 	}
 
+	const OAuthClient = getOAuthClient(provider);
+
 	try {
-		const oAuthUser = await new OAuthClient().fetchUser(
+		const oAuthUser = await getOAuthClient(provider).fetchUser(
 			code,
 			state,
 			await cookies()

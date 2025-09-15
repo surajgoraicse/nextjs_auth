@@ -6,7 +6,6 @@ import { eq } from "drizzle-orm";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { OAuthClient } from "../core/oauth/base";
 import {
 	comparePasswords,
 	generateSalt,
@@ -14,6 +13,7 @@ import {
 } from "../core/passwordHasher";
 import { createUserSession, removeUserFromSession } from "../core/session";
 import { signInSchema, signUpSchema } from "./schemas";
+import { getOAuthClient } from "../core/oauth/base";
 
 export async function signIn(unsafeData: z.infer<typeof signInSchema>) {
 	const { success, data } = signInSchema.safeParse(unsafeData);
@@ -86,6 +86,6 @@ export async function logOut() {
 }
 
 export async function oAuthSignIn(provider: OAuthProvider) {
-	// const oAuthClient = getOAuthClient(provider);
-	redirect(new OAuthClient().createAuthUrl(await cookies()));
+	const oAuthClient = getOAuthClient(provider);
+	redirect(oAuthClient.createAuthUrl(await cookies()));
 }
